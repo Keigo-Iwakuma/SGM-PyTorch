@@ -109,3 +109,66 @@ def get_model_fn(model, train=False):
             return model(x, labels)
     
     return model_fn
+
+
+def get_score_fn(sde, model, train=False, continuous=False):
+    """Wraps `score_fn` so that the model output corresponds to a real time-dependent score function.
+    
+    Args:
+        sde: An `sde_lib.SDE` object that represents the forward SDE.
+        model: A score model.
+        train: `True` for training and `False` for evaluation.
+        continuous: If `True`, the score-based model is expected to directly take continuous time steps.
+
+    Returns:
+        A score function.
+    """
+
+    model_fn = get_model_fn(model, train=train)
+
+    if isinstance(sde, sde_lib.VPSDE) or isinstance(sde, sde_lib.subVPSDE):
+        def score_fn(x, t):
+            # Scale neural network output by standard deviation and flip sign
+            if continuous or isinstance(sde, sde_lib.subVPSDE):
+                # For VP-trained models, t=0 corresponds to the lowest noise level
+                # The maximum value of time embedding is assuemd to 999 for
+                # continuously-trained models.
+                labels = t * 999
+                score = model_fn(x, labels)
+                std = sde.marginal_prob(torch.zero_like(x), t)[1]
+            else:
+                # For VP-trained models, t=0 corresponds to the lowest noise level
+                labels = t * (sde.N - 1)
+                score = model_fn(x, labels)
+                std = sde.sqrt_1m_alphas_cumprod.to(labels.device)[labels.long()]
+            
+            score = -score / std[:, None, None, None]
+            return score
+
+    elif isinstance(sde, sde_lib.VESDE):
+        def score_fn(x, t):
+            if continuous:
+                labels = sde.marginal_prob(torch.zeros_like(x), t)[1]
+            else:
+                # For VE-trained models, t=0 corresponds to the highest noise level
+                labels = sde.T - t
+                labels * sde.N - 1
+                labels = torch.round(labels).long()
+            
+            score = model_fn(x, labels)
+            return score
+    
+    else:
+        raise NotImplementedError(f"SDE class {sde.__classs__.__name__} not yet supported.")
+    
+    return score_fn
+
+
+def to_flattend_numpy(x):
+    """Flatten a torch tensor `x` and convert it to numpy."""
+    return x.detach().cpu().numpy().reshape((-1,))
+
+
+def from_flattened_numpy(x, shape):
+    """Form a torch tensor with the given `shape` from a flattened numpy array `x`."""
+    return torch.from_numpy(x.reshape(shape))
