@@ -40,7 +40,11 @@ def get_sigmas(config):
         sigmas: a jax numpy array of noise levels
     """
     sigmas = np.exp(
-        np.linspace(np.log(config.model.sigma_max), np.log(config.model.sigma_min), config.model.num_scales)
+        np.linspace(
+            np.log(config.model.sigma_max),
+            np.log(config.model.sigma_min),
+            config.model.num_scales,
+        )
     )
     return sigmas
 
@@ -53,10 +57,10 @@ def get_ddpm_params(config):
     beta_end = config.model.beta_max / config.model.num_scales
     betas = np.linspace(beta_start, beta_end, num_diffusion_timesteps, dtype=np.float64)
 
-    alphas = 1. - betas
+    alphas = 1.0 - betas
     alphas_cumprod = np.cumprod(alphas, axis=0)
     sqrt_alphas_cumprod = np.sqrt(alphas_cumprod)
-    sqrt_1m_alphas_cumprod = np.sqrt(1. - alphas_cumprod)
+    sqrt_1m_alphas_cumprod = np.sqrt(1.0 - alphas_cumprod)
 
     return {
         "betas": betas,
@@ -81,23 +85,23 @@ def create_model(config):
 
 def get_model_fn(model, train=False):
     """Create a function to give the output of the score-based model.
-    
+
     Args:
         model: The score model.
         train: `True` for training and `False` for evaluation.
-    
+
     Returns:
         A model function.
     """
 
     def model_fn(x, labels):
         """Compute the output of the score-based model.
-        
+
         Args:
             x: A mini-batch of input data.
             labels: A mini-batch of conditioning variables for time steps. Should be interpreted differently
                 for different models.
-        
+
         Returns:
             A tuple of (model output, new mutable states)
         """
@@ -107,13 +111,13 @@ def get_model_fn(model, train=False):
         else:
             model.train()
             return model(x, labels)
-    
+
     return model_fn
 
 
 def get_score_fn(sde, model, train=False, continuous=False):
     """Wraps `score_fn` so that the model output corresponds to a real time-dependent score function.
-    
+
     Args:
         sde: An `sde_lib.SDE` object that represents the forward SDE.
         model: A score model.
@@ -127,6 +131,7 @@ def get_score_fn(sde, model, train=False, continuous=False):
     model_fn = get_model_fn(model, train=train)
 
     if isinstance(sde, sde_lib.VPSDE) or isinstance(sde, sde_lib.subVPSDE):
+
         def score_fn(x, t):
             # Scale neural network output by standard deviation and flip sign
             if continuous or isinstance(sde, sde_lib.subVPSDE):
@@ -141,11 +146,12 @@ def get_score_fn(sde, model, train=False, continuous=False):
                 labels = t * (sde.N - 1)
                 score = model_fn(x, labels)
                 std = sde.sqrt_1m_alphas_cumprod.to(labels.device)[labels.long()]
-            
+
             score = -score / std[:, None, None, None]
             return score
 
     elif isinstance(sde, sde_lib.VESDE):
+
         def score_fn(x, t):
             if continuous:
                 labels = sde.marginal_prob(torch.zeros_like(x), t)[1]
@@ -154,13 +160,15 @@ def get_score_fn(sde, model, train=False, continuous=False):
                 labels = sde.T - t
                 labels * sde.N - 1
                 labels = torch.round(labels).long()
-            
+
             score = model_fn(x, labels)
             return score
-    
+
     else:
-        raise NotImplementedError(f"SDE class {sde.__classs__.__name__} not yet supported.")
-    
+        raise NotImplementedError(
+            f"SDE class {sde.__classs__.__name__} not yet supported."
+        )
+
     return score_fn
 
 
