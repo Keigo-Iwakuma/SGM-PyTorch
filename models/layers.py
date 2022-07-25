@@ -3,6 +3,7 @@
 import math
 import string
 from functools import partial
+from cv2 import norm
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
@@ -190,3 +191,169 @@ class CondCRPBlock(nn.Module):
             path = self.convs[i](path)
             x = path + x
         return x
+
+
+class RCUBlock(nn.Module):
+    def __init__(self, features, n_blocks, n_stages, act=nn.ReLU()):
+        super().__init__()
+
+        for i in range(n_blocks):
+            for j in range(n_stage):
+                setattr(self, f"{i+1}_{j+1}_conv", ncsn_conv3x3(features, features, stride=1, bias=False))
+        
+        self.stride = 1
+        self.n_blocks = n_blocks
+        self.n_stages = n_stages
+        self.act = act
+    
+    def forward(self, x):
+        for i in range(self.n_blocks):
+            residual = x
+            for j in range(self.n_stages):
+                x = self.act(x)
+                x = getattr(self, f"{i+1}_{j+1}_conv")(x)
+            x += residual
+        return x
+
+
+class CondRCUBlock(nn.Module):
+    def __init__(self, features, n_blocks, n_stages, num_classes, normalizer, act=nn.ReLU()):
+        super().__init__()
+        for i in range(n_blocks):
+            for j in range(n_stages):
+                setattr(self, f"{i+1}_{j+1}_norm", normalizer(features, num_classes, bias=True))
+                setattr(self, f"{i+1}_{j+1}_conv", ncsn_conv3x3(features, features, stride=1, bias=False))
+
+        self.stride = 1
+        self.n_blocks = n_blocks
+        self.n_stages = n_stages
+        self.act = act
+        self.normalizer = normalizer
+    
+    def forward(self, x, y):
+        for i in range(self.n_blocks):
+            residual = x
+            for j in range(self.n_stages):
+                x = getattr(self, f"{i+1}_{j+1}_norm",)(x, y)
+                x = self.act(x)
+                x = getattr(self, f"{i+1}_{j+1}_conv")(x)
+            x += residual
+        return x
+
+    
+class MSFBlock(nn.Module):
+    def __init__(self, in_planes, features):
+        super().__init__()
+        assert isinstance(in_planes, list) or isinstance(in_planes, tuple)
+
+        self.convs = nn.ModuleList()
+        self.features = features
+
+        for i in range(len(in_planes)):
+            self.convs.append(ncsn_conv3x3(in_planes[i], features, stride=1, bias=True))
+        
+    def forward(self, xs, shape):
+        sums = torch.zeros(xs[0].shape[0], self.features, *shape, device=xs[0].device)
+        for i in range(len(self.convs)):
+            h = self.convs[i](xs[i])
+            h = F.interpolate(h, size=shape, mode="bilinear", align_corners=True)
+            sums += h
+        return sums
+
+
+class CondMSFBlock(nn.Module):
+    def __init__(self, in_planes, features, num_classes, normalizer):
+        super().__init__()
+        assert isinstance(in_planes, list) or isinstance(in_planes, tuple)
+
+        self.convs = nn.ModuleList()
+        self.norms = nn.ModuleList()
+        self.features = features
+        self.normalizer = normalizer
+
+        for i in range(len(in_planes)):
+            self.convs.append(ncsn_conv3x3(in_planes[i], features, stride=1, bias=True))
+            self.norms.append(normalizer(in_planes[i], num_classes, bias=True))
+    
+    def forward(self, xs, y, shape):
+        sums = torch.zeros(xs[0].shape[0], self.features, *shape, device=xs[0].device)
+        for i in range(len(self.convs)):
+            h = self.norms[i](xs[i], y)
+            h = self.convs[i](h)
+            h = F.interpolate(h, size=shape, mode="bilinear", align_corners=True)
+            sums += h
+        return sums
+
+
+class RefineBlock(nn.Module):
+    def __init__(self, in_planes, features, act=nn.ReLU(), start=False, end=False, maxpool=True):
+        super().__init__()
+
+        assert isinstance(in_planes, list) or isinstance(in_planes, tuple)
+        self.n_blocks = n_blocks = len(in_planes)
+
+        self.adapt_convs = nn.ModuleList()
+        for i in range(n_blocks):
+            self.adapt_convs.append(RCUBlock(in_planes[i], 2, 2, act))
+        
+        self.output_convs = RCUBlock(features, 3 if end else 1, 2, act)
+
+        if not start:
+            self.msf = MSFBlock(in_planes, features)
+        
+        self.crp = CRPBlock(features, 2, act, maxpool=maxpool)
+    
+    def forward(self, xs, output_shape):
+        assert isinstance(xs, list) or isinstance(xs, tuple)
+        hs = []
+        for i in range(len(xs)):
+            h = self.adapt_convs[i](xs[i])
+            hs.append(h)
+        
+        if self.n_blocks > 1:
+            h = self.msf(hs, output_shape)
+        else:
+            h = hs[0]
+        
+        h = self.crp(h)
+        h = self.output_convs[h]
+
+        return h
+
+
+class CondRefineBlock(nn.Module):
+    def __init__(self, in_planes, features, num_classes, normalizer, act=nn.ReLU(), start=False, end=False):
+        super().__init__()
+
+        assert isinstance(in_planes, list) or isinstance(in_planes, tuple)
+        self.n_blocks = n_blocks = len(in_planes)
+
+        self.adapt_convs = nn.ModuleList()
+        for i in range(n_blocks):
+            self.adapt_convs.append(
+                CondRCUBlock(in_planes[i], 2, 2, num_classes, normalizer, act)
+            )
+        
+        self.output_convs = CondRCUBlock(features, 3 if end else 1, 2, num_classes, normalizer, act)
+
+        if not start:
+            self.msf = CondMSFBlock(in_planes, features, num_classes, normalizer)
+        
+        self.crp = CondCRPBlock(features, 2, num_classes, normalizer, act)
+    
+    def forward(self, xs, y, output_shape):
+        assert isinstance(xs, list) or isinstance(xs, tuple)
+        hs = []
+        for i in range(len(xs)):
+            h = self.adapt_convs[i](xs[i], y)
+            hs.append(h)
+        
+        if self.n_blocks > 1:
+            h = self.msf(hs, y, output_shape)
+        else:
+            h = hs[0]
+        
+        h = self.crp(h, y)
+        h = self.output_convs(h, y)
+
+        return h
