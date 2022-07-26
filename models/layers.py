@@ -357,3 +357,192 @@ class CondRefineBlock(nn.Module):
         h = self.output_convs(h, y)
 
         return h
+
+
+class ConvMeanPool(nn.Module):
+    def __init__(self, input_dim, output_dim, kernel_size=3, biases=True, adjust_padding=False):
+        super().__init__()
+        if not adjust_padding:
+            conv = nn.Conv2d(input_dim, output_dim, kernel_size, stride=1, padding=kernel_size // 2, bias=biases)
+            self.conv = conv
+        else:
+            conv = nn.Conv2d(input_dim, output_dim, kernel_size, stride=1, padding=kernel_size // 2, bias=biases)
+            self.conv = nn.Sequential(
+                nn.ZeroPad2d((1, 0, 1, 0)),
+                conv,
+            )
+    
+    def forward(self, inputs):
+        output = self.conv(inputs)
+        output = sum([
+            output[:, :, ::2, ::2],
+            output[:, :, 1::2, ::2],
+            output[:, :, ::2, 1::2],
+            output[:, :, 1::2, 1::2],
+        ]) / 4.
+        return output
+
+
+class MeanPoolConv(nn.Module):
+    def __init__(self, input_dim, output_dim, kernel_size=3, biases=True):
+        super().__init__()
+        self.conv = nn.Conv2d(input_dim, output_dim, kernel_size, stride=1, padding=kernel_size // 2, bias=biases)
+    
+    def forward(self, inputs):
+        output = inputs
+        output = sum([
+            output[:, :, ::2, ::2],
+            output[:, :, 1::2, ::2],
+            output[:, :, ::2, 1::2],
+            output[:, :, 1::2, 1::2],
+        ]) / 4.
+        return self.conv(output)
+
+
+class UpsampleConv(nn.Module):
+    def __init__(self, input_dim, output_dim, kernel_size=3, biases=True):
+        super().__init__()
+        self.conv = nn.Conv2d(input_dim, output_dim, kernel_size, stride=1, padding=kernel_size // 2, bias=biases)
+        self.pixelshuffle = nn.PixelShuffle(upscale_factor=2)
+    
+    def forward(self, inputs):
+        output = inputs
+        output = torch.cat([output, output, output, output], dim=1)
+        output = self.pixelshuffle(output)
+        return self.conv(output)
+
+
+class ConditionalResidualBlock(nn.Module):
+    def __init__(
+        self, 
+        input_dim, 
+        output_dim, 
+        num_classes, 
+        resample=None, 
+        act=nn.ELU(),
+        normalization=ConditionalInstanceNorm2dPlus,
+        adjust_padding=False,
+        dilation=None,
+    ):
+        super().__init__()
+        self.non_linearity = act
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.resample = resample
+        self.normalization = normalization
+        if resample == "down":
+            if dilation > 1:
+                self.conv1 = ncsn_conv3x3(input_dim, input_dim, dilation=dilation)
+                self.normalize2 = normalization(input_dim, num_classes)
+                self.conv2 = ncsn_conv3x3(input_dim, output_dim, dilation=dilation)
+                conv_shortcut = partial(ncsn_conv3x3, dilation=dilation)
+            else:
+                self.conv1 = ncsn_conv3x3(input_dim, input_dim)
+                self.normalize2 = normalization(input_dim, num_classes)
+                self.conv2 = ConvMeanPool(input_dim, output_dim, 3, adjust_padding=adjust_padding)
+                conv_shortcut = partial(ConvMeanPool, kernel_size=1, adjust_padding=adjust_padding)
+        
+        elif resample is None:
+            if dilation > 1:
+                conv_shortcut = partial(ncsn_conv3x3, dilation=dilation)
+                self.conv1 = ncsn_conv3x3(input_dim, output_dim, dilation=dilation)
+                self.normalize2 = normalization(output_dim, num_classes)
+                self.conv1 = ncsn_conv3x3(output_dim, output_dim, dilation=dilation)
+            else:
+                conv_shortcut = nn.Conv2d
+                self.conv1 = ncsn_conv3x3(input_dim, output_dim)
+                self.normalize2 = normalization(output_dim, num_classes)
+                self.conv2 = ncsn_conv3x3(output_dim, output_dim)
+        else:
+            raise Exception("invalid resample value")
+        
+        if output_dim != input_dim or resample is not None:
+            self.shortcut = conv_shortcut(input_dim, output_dim)
+        
+        self.normalize1 = normalization(input_dim, num_classes)
+    
+    def forward(self, x, y):
+        output = self.normalize1(x, y)
+        output = self.non_linearity(output)
+        output = self.conv1(output)
+        output = self.normalize2(output, y)
+        output = self.non_linearity(output)
+        output = self.conv2(output)
+
+        if self.output_dim == self.input_dim and self.resample is None:
+            shortcut = x
+        else:
+            shortcut = self.shortcut(x)
+        
+        return shortcut + output
+
+
+class ResidualBlock(nn.Module):
+    def __init__(
+        self,
+        input_dim,
+        output_dim,
+        resample=None,
+        act=nn.ELU(),
+        normalization=nn.InstanceNorm2d,
+        adjust_padding=False,
+        dilation=1,
+    ):
+        super().__init__()
+        self.non_linearity = act
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.resample = resample
+        self.normalization = normalization
+        if resample == "down":
+            if dilation > 1:
+                self.conv1 = ncsn_conv3x3(input_dim, input_dim, dilation=dilation)
+                self.normalize2 = normalization(input_dim)
+                self.conv2 = ncsn_conv3x3(input_dim, output_dim, dilation=dilation)
+                conv_shortcut = partial(ncsn_conv3x3, dilation=dilation)
+            else:
+                self.conv1 = ncsn_conv3x3(input_dim, input_dim)
+                self.normalize2 = normalization(input_dim)
+                self.conv2 = ConvMeanPool(input_dim, output_dim, 3, adjust_padding=adjust_padding)
+                conv_shortcut = partial(ConvMeanPool, kernel_size=1, adjust_padding=adjust_padding)
+        
+        elif resample is None:
+            if dilation > 1:
+                conv_shortcut = partial(ncsn_conv3x3, dilation=dilation)
+                self.conv1 = ncsn_conv3x3(input_dim, output_dim, dilation=dilation)
+                self.normalize2 = normalization(output_dim)
+                self.conv1 = ncsn_conv3x3(output_dim, output_dim, dilation=dilation)
+            else:
+                # conv_shortcut = nn.Conv2d ### Something weird here.
+                conv_shortcut = partial(ncsn_conv1x1)
+                self.conv1 = ncsn_conv3x3(input_dim, output_dim)
+                self.normalize2 = normalization(output_dim)
+                self.conv2 = ncsn_conv3x3(output_dim, output_dim)
+        else:
+            raise Exception("invalid resample value")
+        
+        if output_dim != input_dim or resample is not None:
+            self.shortcut = conv_shortcut(input_dim, output_dim)
+        
+        self.normalize1 = normalization(input_dim)
+    
+    def forward(self, x):
+        output = self.normalize1(x)
+        output = self.non_linearity(output)
+        output = self.conv1(output)
+        output = self.normalize2(output)
+        output = self.non_linearity(output)
+        output = self.conv2(output)
+
+        if self.output_dim == self.input_dim and self.resample is None:
+            shortcut = x
+        else:
+            shortcut = self.shortcut(x)
+        
+        return shortcut + output
+
+
+############################################################################
+# Functions below are ported over from the DDPM codebase:                  #
+# https://github.com/hojonathanho/diffusion/blob/master/diffusion_tf/nn.py #
+############################################################################
