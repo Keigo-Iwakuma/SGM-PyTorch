@@ -198,14 +198,18 @@ class RCUBlock(nn.Module):
         super().__init__()
 
         for i in range(n_blocks):
-            for j in range(n_stage):
-                setattr(self, f"{i+1}_{j+1}_conv", ncsn_conv3x3(features, features, stride=1, bias=False))
-        
+            for j in range(n_stages):
+                setattr(
+                    self,
+                    f"{i+1}_{j+1}_conv",
+                    ncsn_conv3x3(features, features, stride=1, bias=False),
+                )
+
         self.stride = 1
         self.n_blocks = n_blocks
         self.n_stages = n_stages
         self.act = act
-    
+
     def forward(self, x):
         for i in range(self.n_blocks):
             residual = x
@@ -217,30 +221,43 @@ class RCUBlock(nn.Module):
 
 
 class CondRCUBlock(nn.Module):
-    def __init__(self, features, n_blocks, n_stages, num_classes, normalizer, act=nn.ReLU()):
+    def __init__(
+        self, features, n_blocks, n_stages, num_classes, normalizer, act=nn.ReLU()
+    ):
         super().__init__()
         for i in range(n_blocks):
             for j in range(n_stages):
-                setattr(self, f"{i+1}_{j+1}_norm", normalizer(features, num_classes, bias=True))
-                setattr(self, f"{i+1}_{j+1}_conv", ncsn_conv3x3(features, features, stride=1, bias=False))
+                setattr(
+                    self,
+                    f"{i+1}_{j+1}_norm",
+                    normalizer(features, num_classes, bias=True),
+                )
+                setattr(
+                    self,
+                    f"{i+1}_{j+1}_conv",
+                    ncsn_conv3x3(features, features, stride=1, bias=False),
+                )
 
         self.stride = 1
         self.n_blocks = n_blocks
         self.n_stages = n_stages
         self.act = act
         self.normalizer = normalizer
-    
+
     def forward(self, x, y):
         for i in range(self.n_blocks):
             residual = x
             for j in range(self.n_stages):
-                x = getattr(self, f"{i+1}_{j+1}_norm",)(x, y)
+                x = getattr(
+                    self,
+                    f"{i+1}_{j+1}_norm",
+                )(x, y)
                 x = self.act(x)
                 x = getattr(self, f"{i+1}_{j+1}_conv")(x)
             x += residual
         return x
 
-    
+
 class MSFBlock(nn.Module):
     def __init__(self, in_planes, features):
         super().__init__()
@@ -251,7 +268,7 @@ class MSFBlock(nn.Module):
 
         for i in range(len(in_planes)):
             self.convs.append(ncsn_conv3x3(in_planes[i], features, stride=1, bias=True))
-        
+
     def forward(self, xs, shape):
         sums = torch.zeros(xs[0].shape[0], self.features, *shape, device=xs[0].device)
         for i in range(len(self.convs)):
@@ -274,7 +291,7 @@ class CondMSFBlock(nn.Module):
         for i in range(len(in_planes)):
             self.convs.append(ncsn_conv3x3(in_planes[i], features, stride=1, bias=True))
             self.norms.append(normalizer(in_planes[i], num_classes, bias=True))
-    
+
     def forward(self, xs, y, shape):
         sums = torch.zeros(xs[0].shape[0], self.features, *shape, device=xs[0].device)
         for i in range(len(self.convs)):
@@ -286,7 +303,9 @@ class CondMSFBlock(nn.Module):
 
 
 class RefineBlock(nn.Module):
-    def __init__(self, in_planes, features, act=nn.ReLU(), start=False, end=False, maxpool=True):
+    def __init__(
+        self, in_planes, features, act=nn.ReLU(), start=False, end=False, maxpool=True
+    ):
         super().__init__()
 
         assert isinstance(in_planes, list) or isinstance(in_planes, tuple)
@@ -295,26 +314,26 @@ class RefineBlock(nn.Module):
         self.adapt_convs = nn.ModuleList()
         for i in range(n_blocks):
             self.adapt_convs.append(RCUBlock(in_planes[i], 2, 2, act))
-        
+
         self.output_convs = RCUBlock(features, 3 if end else 1, 2, act)
 
         if not start:
             self.msf = MSFBlock(in_planes, features)
-        
+
         self.crp = CRPBlock(features, 2, act, maxpool=maxpool)
-    
+
     def forward(self, xs, output_shape):
         assert isinstance(xs, list) or isinstance(xs, tuple)
         hs = []
         for i in range(len(xs)):
             h = self.adapt_convs[i](xs[i])
             hs.append(h)
-        
+
         if self.n_blocks > 1:
             h = self.msf(hs, output_shape)
         else:
             h = hs[0]
-        
+
         h = self.crp(h)
         h = self.output_convs[h]
 
@@ -322,7 +341,16 @@ class RefineBlock(nn.Module):
 
 
 class CondRefineBlock(nn.Module):
-    def __init__(self, in_planes, features, num_classes, normalizer, act=nn.ReLU(), start=False, end=False):
+    def __init__(
+        self,
+        in_planes,
+        features,
+        num_classes,
+        normalizer,
+        act=nn.ReLU(),
+        start=False,
+        end=False,
+    ):
         super().__init__()
 
         assert isinstance(in_planes, list) or isinstance(in_planes, tuple)
@@ -333,26 +361,28 @@ class CondRefineBlock(nn.Module):
             self.adapt_convs.append(
                 CondRCUBlock(in_planes[i], 2, 2, num_classes, normalizer, act)
             )
-        
-        self.output_convs = CondRCUBlock(features, 3 if end else 1, 2, num_classes, normalizer, act)
+
+        self.output_convs = CondRCUBlock(
+            features, 3 if end else 1, 2, num_classes, normalizer, act
+        )
 
         if not start:
             self.msf = CondMSFBlock(in_planes, features, num_classes, normalizer)
-        
+
         self.crp = CondCRPBlock(features, 2, num_classes, normalizer, act)
-    
+
     def forward(self, xs, y, output_shape):
         assert isinstance(xs, list) or isinstance(xs, tuple)
         hs = []
         for i in range(len(xs)):
             h = self.adapt_convs[i](xs[i], y)
             hs.append(h)
-        
+
         if self.n_blocks > 1:
             h = self.msf(hs, y, output_shape)
         else:
             h = hs[0]
-        
+
         h = self.crp(h, y)
         h = self.output_convs(h, y)
 
@@ -360,51 +390,91 @@ class CondRefineBlock(nn.Module):
 
 
 class ConvMeanPool(nn.Module):
-    def __init__(self, input_dim, output_dim, kernel_size=3, biases=True, adjust_padding=False):
+    def __init__(
+        self, input_dim, output_dim, kernel_size=3, biases=True, adjust_padding=False
+    ):
         super().__init__()
         if not adjust_padding:
-            conv = nn.Conv2d(input_dim, output_dim, kernel_size, stride=1, padding=kernel_size // 2, bias=biases)
+            conv = nn.Conv2d(
+                input_dim,
+                output_dim,
+                kernel_size,
+                stride=1,
+                padding=kernel_size // 2,
+                bias=biases,
+            )
             self.conv = conv
         else:
-            conv = nn.Conv2d(input_dim, output_dim, kernel_size, stride=1, padding=kernel_size // 2, bias=biases)
+            conv = nn.Conv2d(
+                input_dim,
+                output_dim,
+                kernel_size,
+                stride=1,
+                padding=kernel_size // 2,
+                bias=biases,
+            )
             self.conv = nn.Sequential(
                 nn.ZeroPad2d((1, 0, 1, 0)),
                 conv,
             )
-    
+
     def forward(self, inputs):
         output = self.conv(inputs)
-        output = sum([
-            output[:, :, ::2, ::2],
-            output[:, :, 1::2, ::2],
-            output[:, :, ::2, 1::2],
-            output[:, :, 1::2, 1::2],
-        ]) / 4.
+        output = (
+            sum(
+                [
+                    output[:, :, ::2, ::2],
+                    output[:, :, 1::2, ::2],
+                    output[:, :, ::2, 1::2],
+                    output[:, :, 1::2, 1::2],
+                ]
+            )
+            / 4.0
+        )
         return output
 
 
 class MeanPoolConv(nn.Module):
     def __init__(self, input_dim, output_dim, kernel_size=3, biases=True):
         super().__init__()
-        self.conv = nn.Conv2d(input_dim, output_dim, kernel_size, stride=1, padding=kernel_size // 2, bias=biases)
-    
+        self.conv = nn.Conv2d(
+            input_dim,
+            output_dim,
+            kernel_size,
+            stride=1,
+            padding=kernel_size // 2,
+            bias=biases,
+        )
+
     def forward(self, inputs):
         output = inputs
-        output = sum([
-            output[:, :, ::2, ::2],
-            output[:, :, 1::2, ::2],
-            output[:, :, ::2, 1::2],
-            output[:, :, 1::2, 1::2],
-        ]) / 4.
+        output = (
+            sum(
+                [
+                    output[:, :, ::2, ::2],
+                    output[:, :, 1::2, ::2],
+                    output[:, :, ::2, 1::2],
+                    output[:, :, 1::2, 1::2],
+                ]
+            )
+            / 4.0
+        )
         return self.conv(output)
 
 
 class UpsampleConv(nn.Module):
     def __init__(self, input_dim, output_dim, kernel_size=3, biases=True):
         super().__init__()
-        self.conv = nn.Conv2d(input_dim, output_dim, kernel_size, stride=1, padding=kernel_size // 2, bias=biases)
+        self.conv = nn.Conv2d(
+            input_dim,
+            output_dim,
+            kernel_size,
+            stride=1,
+            padding=kernel_size // 2,
+            bias=biases,
+        )
         self.pixelshuffle = nn.PixelShuffle(upscale_factor=2)
-    
+
     def forward(self, inputs):
         output = inputs
         output = torch.cat([output, output, output, output], dim=1)
@@ -414,11 +484,11 @@ class UpsampleConv(nn.Module):
 
 class ConditionalResidualBlock(nn.Module):
     def __init__(
-        self, 
-        input_dim, 
-        output_dim, 
-        num_classes, 
-        resample=None, 
+        self,
+        input_dim,
+        output_dim,
+        num_classes,
+        resample=None,
         act=nn.ELU(),
         normalization=ConditionalInstanceNorm2dPlus,
         adjust_padding=False,
@@ -439,9 +509,13 @@ class ConditionalResidualBlock(nn.Module):
             else:
                 self.conv1 = ncsn_conv3x3(input_dim, input_dim)
                 self.normalize2 = normalization(input_dim, num_classes)
-                self.conv2 = ConvMeanPool(input_dim, output_dim, 3, adjust_padding=adjust_padding)
-                conv_shortcut = partial(ConvMeanPool, kernel_size=1, adjust_padding=adjust_padding)
-        
+                self.conv2 = ConvMeanPool(
+                    input_dim, output_dim, 3, adjust_padding=adjust_padding
+                )
+                conv_shortcut = partial(
+                    ConvMeanPool, kernel_size=1, adjust_padding=adjust_padding
+                )
+
         elif resample is None:
             if dilation > 1:
                 conv_shortcut = partial(ncsn_conv3x3, dilation=dilation)
@@ -455,12 +529,12 @@ class ConditionalResidualBlock(nn.Module):
                 self.conv2 = ncsn_conv3x3(output_dim, output_dim)
         else:
             raise Exception("invalid resample value")
-        
+
         if output_dim != input_dim or resample is not None:
             self.shortcut = conv_shortcut(input_dim, output_dim)
-        
+
         self.normalize1 = normalization(input_dim, num_classes)
-    
+
     def forward(self, x, y):
         output = self.normalize1(x, y)
         output = self.non_linearity(output)
@@ -473,7 +547,7 @@ class ConditionalResidualBlock(nn.Module):
             shortcut = x
         else:
             shortcut = self.shortcut(x)
-        
+
         return shortcut + output
 
 
@@ -503,9 +577,13 @@ class ResidualBlock(nn.Module):
             else:
                 self.conv1 = ncsn_conv3x3(input_dim, input_dim)
                 self.normalize2 = normalization(input_dim)
-                self.conv2 = ConvMeanPool(input_dim, output_dim, 3, adjust_padding=adjust_padding)
-                conv_shortcut = partial(ConvMeanPool, kernel_size=1, adjust_padding=adjust_padding)
-        
+                self.conv2 = ConvMeanPool(
+                    input_dim, output_dim, 3, adjust_padding=adjust_padding
+                )
+                conv_shortcut = partial(
+                    ConvMeanPool, kernel_size=1, adjust_padding=adjust_padding
+                )
+
         elif resample is None:
             if dilation > 1:
                 conv_shortcut = partial(ncsn_conv3x3, dilation=dilation)
@@ -520,12 +598,12 @@ class ResidualBlock(nn.Module):
                 self.conv2 = ncsn_conv3x3(output_dim, output_dim)
         else:
             raise Exception("invalid resample value")
-        
+
         if output_dim != input_dim or resample is not None:
             self.shortcut = conv_shortcut(input_dim, output_dim)
-        
+
         self.normalize1 = normalization(input_dim)
-    
+
     def forward(self, x):
         output = self.normalize1(x)
         output = self.non_linearity(output)
@@ -538,7 +616,7 @@ class ResidualBlock(nn.Module):
             shortcut = x
         else:
             shortcut = self.shortcut(x)
-        
+
         return shortcut + output
 
 
@@ -554,7 +632,9 @@ def get_timestep_embedding(timesteps, embedding_dim, max_positions=10000):
     # magic number 10000 is from transformers
     emb = math.log(max_positions) / (half_dim - 1)
     # emb = math.log(2.) / (half_dim - 1)
-    emb = torch.exp(torch.arange(half_dim, dtype=torch.float32, device=timesteps.device) * -emb)
+    emb = torch.exp(
+        torch.arange(half_dim, dtype=torch.float32, device=timesteps.device) * -emb
+    )
     # emb = tf.range(num_embeddings, dtype=jnp.float32)[:, None] * emb[None, :]
     # emb = tf.cast(timesteps, dtype=jnp.float32)[:, None] * emb[None, :]
     emb = timesteps.float()[:, None] * emb[None, :]
@@ -563,3 +643,142 @@ def get_timestep_embedding(timesteps, embedding_dim, max_positions=10000):
         emb = F.pad(emb, (0, 1), mode="constant")
     assert emb.shape == (timesteps.shape[0], embedding_dim)
     return emb
+
+
+def _einsum(a, b, c, x, y):
+    einsum_str = f"{''.join(a)},{''.join(b)}->{''.join(c)}"
+    return torch.einsum(einsum_str, x, y)
+
+
+def contract_inner(x, y):
+    """tensordot(x, y, 1)"""
+    x_chars = list(string.ascii_lowercase[: len(x.shape)])
+    y_chars = list(string.ascii_lowercase[len(x.shape) : len(y.shape) + len(x.shape)])
+    y_chars[0] = x_chars[-1]  # first axis of y and last of x get summed
+    out_chars = x_chars[:-1] + y_chars[1:]
+    return _einsum(x_chars, y_chars, out_chars, x, y)
+
+
+class NIN(nn.Module):
+    def __init__(self, in_dim, num_units, init_scale=0.1):
+        super().__init__()
+        self.W = nn.Parameter(
+            default_init(scale=init_scale)((in_dim, num_units)), requires_grad=True
+        )
+        self.b = nn.Parameter(torch.zeros(num_units), requires_grad=True)
+
+    def forward(self, x):
+        x = x.permute(0, 2, 3, 1)
+        y = contract_inner(x, self.W) + self.b
+        return y.permute(0, 3, 1, 2)
+
+
+class AttnBlock(nn.Module):
+    """Channel-wise self-attention block."""
+
+    def __init__(self, channels):
+        super().__init__()
+        self.GroupNorm_0 = nn.GroupNorm(num_groups=32, num_channels=channels, eps=1e-6)
+        self.NIN_0 = NIN(channels, channels)
+        self.NIN_1 = NIN(channels, channels)
+        self.NIN_2 = NIN(channels, channels)
+        self.NIN_3 = NIN(channels, channels, init_scale=0.0)
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        h = self.GroupNorm_0(x)
+        q = self.NIN_0(h)
+        k = self.NIN_1(h)
+        v = self.NIN_2(h)
+
+        w = torch.einsum("bchw,bcij->bhwij", q, k) * (int(C) ** (-0.5))
+        w = torch.reshape(w, (B, H, W, H * W))
+        w = F.softmax(w, dim=-1)
+        w = torch.reshape(w, (B, H, W, H, W))
+        h = torch.einsum("bwhij,bcij->bchw", w, v)
+        h = self.NIN_3(h)
+        return x + h
+
+
+class Upsample(nn.Module):
+    def __init__(self, channels, with_conv=False):
+        super().__init__()
+        if with_conv:
+            self.Conv_0 = ddpm_conv3x3(channels, channels)
+        self.with_conv = with_conv
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        h = F.interpolate(x, (H * 2, W * 2), mode="nearest")
+        if self.with_conv:
+            h = self.Conv_0(h)
+        return h
+
+
+class Downsample(nn.Module):
+    def __init__(self, channels, with_conv=False):
+        super().__init__()
+        if with_conv:
+            self.Conv_0 = ddpm_conv3x3(channels, channels, stride=2, padding=0)
+        self.with_conv = with_conv
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        # Emulate "SAME" padding
+        if self.with_conv:
+            x = F.pad(x, (0, 1, 0, 1))
+            x = self.Conv_0(x)
+        else:
+            x = F.avg_pool2d(x, kernel_size=2, stride=2, padding=0)
+
+        assert x.shape == (B, C, H // 2, W // 2)
+        return x
+
+
+class ResnetBlockDDPM(nn.Module):
+    """The ResNet Blocks used in DDPM."""
+
+    def __init__(
+        self, act, in_ch, out_ch=None, temb_dim=None, conv_shortcut=False, dropout=0.1
+    ):
+        super().__init__()
+        if out_ch is None:
+            out_ch = in_ch
+        self.GroupNorm_0 = nn.GroupNorm(num_groups=32, num_channels=in_ch, eps=1e-6)
+        self.act = act
+        self.Conv_0 = ddpm_conv3x3(in_ch, out_ch)
+        if temb_dim is not None:
+            self.Dense_0 = nn.Linear(temb_dim, out_ch)
+            self.Dense_0.weight.data = default_init()(self.Dense_0.weight.data.shape)
+            nn.init.zeros_(self.Dense_0.bias)
+
+        self.GroupNorm_1 = nn.GroupNorm(num_groups=32, num_channels=out_ch, eps=1e-6)
+        self.Dropout_0 = nn.Dropout(dropout)
+        self.Conv_1 = ddpm_conv3x3(out_ch, out_ch, init_scale=0.0)
+        if in_ch != out_ch:
+            if conv_shortcut:
+                self.Conv_2 = ddpm_conv3x3(in_ch, out_ch)
+            else:
+                self.NIN_0 = NIN(in_ch, out_ch)
+        self.out_ch = out_ch
+        self.in_ch = in_ch
+        self.conv_shortcut = conv_shortcut
+
+    def forward(self, x, temb=None):
+        B, C, H, W = x.shape
+        assert C == self.in_ch
+        out_ch = self.out_ch if self.out_ch else self.in_ch
+        h = self.act(self.GroupNorm_0(x))
+        h = self.Conv_0(h)
+        # Add bias to each feature map conditioned on the time embedding
+        if temb is not None:
+            h += self.Dense_0(self.act(temb))[:, :, None, None]
+        h = self.act(self.GroupNorm_1(h))
+        h = self.Dropout_0(h)
+        h = self.Conv_1(h)
+        if C != out_ch:
+            if self.conv_shortcut:
+                x = self.Conv_2(x)
+            else:
+                x = self.NIN_0(x)
+        return x + h
