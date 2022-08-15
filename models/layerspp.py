@@ -21,7 +21,7 @@ class GaussianFourierProjection(nn.Module):
     def __init__(self, embedding_size=256, scale=1.0):
         super().__init__()
         self.W = nn.Parameter(torch.randn(embedding_size) * scale, requires_grad=False)
-    
+
     def forward(self, x):
         x_proj = x[:, None] * self.W[None, :] * 2 * np.pi
         return torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
@@ -34,7 +34,7 @@ class Combine(nn.Module):
         super().__init__()
         self.Conv_0 = conv1x1(dim1, dim2)
         self.method = method
-    
+
     def forward(self, x, y):
         h = self.Conv_0(x)
         if self.method == "cat":
@@ -48,7 +48,7 @@ class Combine(nn.Module):
 class AttnBlockpp(nn.Module):
     """Channel-wise self-attention block. Modified from DDPM."""
 
-    def __init__(self, channels, skip_rescale=False, init_scale=0.):
+    def __init__(self, channels, skip_rescale=False, init_scale=0.0):
         super().__init__()
         self.GroupNorm_0 = nn.GroupNorm(
             num_groups=min(channels // 4, 32),
@@ -77,11 +77,18 @@ class AttnBlockpp(nn.Module):
         if not self.skip_rescale:
             return x + h
         else:
-            return (x + h) / np.sqrt(2.)
+            return (x + h) / np.sqrt(2.0)
 
 
 class Upsample(nn.Module):
-    def __init__(self, in_ch=None, out_ch=None, with_conv=False, fir=False, fir_kernel=(1, 3, 3, 1)):
+    def __init__(
+        self,
+        in_ch=None,
+        out_ch=None,
+        with_conv=False,
+        fir=False,
+        fir_kernel=(1, 3, 3, 1),
+    ):
         super().__init__()
         out_ch = out_ch if out_ch else in_ch
         if not fir:
@@ -90,8 +97,5 @@ class Upsample(nn.Module):
         else:
             if with_conv:
                 self.Conv2d_0 = up_or_down_sampling.Conv2d(
-                    in_ch,
-                    out_ch,
-                    kernel=3,
-                    up=True
+                    in_ch, out_ch, kernel=3, up=True
                 )
