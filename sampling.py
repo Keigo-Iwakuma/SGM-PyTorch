@@ -28,7 +28,7 @@ def register_predictor(cls=None, *, name=None):
             raise ValueError(f"Already registered model with name: {local_name}")
         _PREDICTORS[local_name] = cls
         return cls
-    
+
     if cls is None:
         return _register
     else:
@@ -47,7 +47,7 @@ def register_corrector(cls=None, *, name=None):
             raise ValueError(f"Already registered model with name: {local_name}")
         _CORRECTORS[local_name] = cls
         return cls
-    
+
     if cls is None:
         return _register
     else:
@@ -72,7 +72,7 @@ def get_sampling_fn(config, sde, shape, inverse_scaler, eps):
         shape: A sequence of integers representing the expected shape of a single sample.
         inverse_scaler: The inverse data normalizer function.
         eps: A `float` number. The reverse-time SDE is only integrated to `eps` for nummerical stability.
-    
+
     Returns:
         A function that takes random states and a replicated training state and outputs samples with the
         trailing dimentions matching `shape`.
@@ -85,6 +85,7 @@ def get_sampling_fn(config, sde, shape, inverse_scaler, eps):
             sde=sde,
         )
 
+
 class Predictor(abc.ABC):
     """The abstract class for a predictor algorithm."""
 
@@ -94,7 +95,7 @@ class Predictor(abc.ABC):
         # Compute the reverse SDE/ODE
         self.rsde = sde.reverse(score_fn, probability_flow)
         self.score_fn = score_fn
-    
+
     @abc.abstractmethod
     def update_fn(self, x, t):
         """
@@ -120,7 +121,7 @@ class Corrector(abc.ABC):
         self.score_fn = score_fn
         self.snr = snr
         self.n_steps = n_steps
-    
+
     @abc.abstractmethod
     def update_fn(self, x, t):
         """

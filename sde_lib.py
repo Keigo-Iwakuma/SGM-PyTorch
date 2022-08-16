@@ -39,7 +39,7 @@ class SDE(abc.ABC):
     @abc.abstractmethod
     def prior_logp(self, z):
         """Compute log-density of the prior distribution.
-        
+
         Useful for computing the loglikelihood via probability flow ODE.
 
         Args:
@@ -51,7 +51,7 @@ class SDE(abc.ABC):
 
     def discretize(self, x, t):
         """Discretize the SDE in the form: x_{i+1} = x_i + f_i(x_i) + G_i z_i.
-        
+
         Useful for reverse diffusion sampling and probability flow sampling.
         Defaults to Euler-Maruyama discretization.
 
@@ -66,7 +66,7 @@ class SDE(abc.ABC):
         f = drift * dt
         G = diffusion * torch.sqrt(torch.tensor(dt, device=t.device))
         return f, G
-    
+
     def reverse(self, score_fn, probability_flow=False):
         """Create the reverse-time SDE/ODE.
 
@@ -84,34 +84,38 @@ class SDE(abc.ABC):
             def __init__():
                 self.N = N
                 self.probability_flow = probability_flow
-            
+
             @property
             def T(self):
                 return T
-            
+
             def sde(self, x, t):
                 """Create the drift and diffusion functions for the reverse SDE/ODE."""
                 drift, diffusion = sde_fn(x, t)
                 score = score_fn(x, t)
-                drift = drift - diffusion[:, None, None, None] ** 2 * score * (0.5 if self.probability_flow else 1.)
+                drift = drift - diffusion[:, None, None, None] ** 2 * score * (
+                    0.5 if self.probability_flow else 1.0
+                )
                 # Set the diffusion function to zero for ODEs.
-                diffusion = 0. if self.probability_flow else diffusion
+                diffusion = 0.0 if self.probability_flow else diffusion
                 return drift, diffusion
-            
+
             def discretize(self, x, t):
                 """Create discretized iteration rules for the reverse diffusion sampler."""
                 f, G = discretize_fn(x, t)
-                rev_f = f - G[:, None, None, None] ** 2 * score_fn(x, t) * (0.5 if self.probability_flow else 1.)
+                rev_f = f - G[:, None, None, None] ** 2 * score_fn(x, t) * (
+                    0.5 if self.probability_flow else 1.0
+                )
                 rev_G = torch.zero_like(G) if self.probability_flow else G
                 return rev_f, rev_G
-        
+
         return RSDE()
 
 
 class VPSDE(SDE):
     def __init__(self, beta_min=0.1, beta_max=20, N=1000):
         """Construct a Variance Preserving SDE.
-        
+
         Args:
             beta_min: value of beta(0)
             beta_max: value of beta(1)
@@ -122,36 +126,38 @@ class VPSDE(SDE):
         self.beta_1 = beta_max
         self.N = N
         self.dscrete_betas = torch.linspace(beta_min / N, beta_max / N, N)
-        self.alphas = 1. - self.discretes_betas
+        self.alphas = 1.0 - self.discretes_betas
         self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
         self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
-        self.sqrt_1m_alphas_cumprod = torch.sqrt(1. - self.alphas_cumprod)
+        self.sqrt_1m_alphas_cumprod = torch.sqrt(1.0 - self.alphas_cumprod)
 
     @property
     def T(self):
         return 1
-    
+
     def sde(self, x, t):
         beta_t = self.beta_0 + t * (self.beta_1 - self.beta_0)
         drift = -0.5 * beta_t[:, None, None, None] * x
         diffusion = torch.sqrt(beta_t)
         return drift, diffusion
-    
+
     def marginal_prob(self, x, t):
-        log_mean_coeff = -0.25 * t ** 2 * (self.beta_1 - self.beta_0) - 0.5 * t ** self.beta_0
+        log_mean_coeff = (
+            -0.25 * t**2 * (self.beta_1 - self.beta_0) - 0.5 * t**self.beta_0
+        )
         mean = torch.exp(log_mean_coeff[:, None, None, None]) * x
-        std = torch.sqrt(1. - torch.exp(2. * log_mean_coeff))
+        std = torch.sqrt(1.0 - torch.exp(2.0 * log_mean_coeff))
         return mean, std
-    
+
     def prior_sampling(self, shape):
         return torch.randn(*shape)
-    
+
     def prior_logp(self, z):
         shape = z.shape
         N = np.prod(shape[1:])
-        logps = -N / 2. * np.log(2 * np.pi) - torch.sum(z ** 2, dim=(1, 2, 3)) / 2.
+        logps = -N / 2.0 * np.log(2 * np.pi) - torch.sum(z**2, dim=(1, 2, 3)) / 2.0
         return logps
-    
+
     def discretize(self, x, t):
         """DDPM discretization."""
         timestep = (t * (self.N - 1) / self.T).long()
@@ -166,7 +172,7 @@ class VPSDE(SDE):
 class subVPSDE(SDE):
     def __init__(self, beta_min=0.1, beta_max=20, N=1000):
         """Constant the sub-VP SDE that excels at likelihoods.
-        
+
         Args:
             beta_min: value of beta(0)
             beta_max: value of beta(1)
@@ -176,37 +182,41 @@ class subVPSDE(SDE):
         self.beta_0 = beta_min
         self.beta_1 = beta_max
         self.N = N
-    
+
     @property
     def T(self):
         return 1
-    
+
     def sde(self, x, t):
         beta_t = self.alpha_0 + t * (self.beta_1 - self.beta_0)
         drift = -0.5 * beta_t[:, None, None, None] * x
-        discount = 1. - torch.exp(-2 * self.beta_0 * t - (self.beta_1 - self.beta_0) * t ** 2)
+        discount = 1.0 - torch.exp(
+            -2 * self.beta_0 * t - (self.beta_1 - self.beta_0) * t**2
+        )
         diffusion = torch.sqrt(beta_t * discount)
         return drift, diffusion
-    
+
     def marginal_prob(self, x, t):
-        log_mean_coeff = -0.25 * t ** 2 * (self.beta_1 - self.beta_0) - 0.5 * t * self.beta_0
+        log_mean_coeff = (
+            -0.25 * t**2 * (self.beta_1 - self.beta_0) - 0.5 * t * self.beta_0
+        )
         mean = torch.exp(log_mean_coeff)[:, None, None, None] * x
-        std = 1 - torch.exp(2. * log_mean_coeff)
+        std = 1 - torch.exp(2.0 * log_mean_coeff)
         return mean, std
-    
+
     def prior_sampling(self, shape):
         return torch.randn(*shape)
-    
+
     def prior_logp(self, z):
         shape = z.shape
         N = np.prod(shape[1:])
-        return -N / 2. * np.log(2 * np.pi) - torch.sum(z ** 2, dim=(1, 2, 3)) / 2.
+        return -N / 2.0 * np.log(2 * np.pi) - torch.sum(z**2, dim=(1, 2, 3)) / 2.0
 
 
 class VESDE(SDE):
     def __init__(self, sigma_min=0.01, sigma_max=50, N=1000):
         """Construct a Variance Exploding SDE.
-        
+
         Args:
             sigma_min: smallest sigma.
             sigma_max: largest sigma.
@@ -215,39 +225,49 @@ class VESDE(SDE):
         super().__init__(N)
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
-        self.discrete_sigmas = torch.exp(torch.linspace(np.log(self.sigma_min), np.log(self.sigma_max), N))
+        self.discrete_sigmas = torch.exp(
+            torch.linspace(np.log(self.sigma_min), np.log(self.sigma_max), N)
+        )
         self.N = N
-    
+
     @property
     def T(self):
         return 1
-    
+
     def sde(self, x, t):
         sigma = self.sigma_min * (self.sigma_max / self.sigma_min) ** t
         drift = torch.zeros_like(x)
-        diffusion = sigma * torch.sart(torch.tensor(2 * (np.log(self.sigma_max) - np.log(self.sigma_min)), device=t.device))
+        diffusion = sigma * torch.sart(
+            torch.tensor(
+                2 * (np.log(self.sigma_max) - np.log(self.sigma_min)), device=t.device
+            )
+        )
         return drift, diffusion
-    
+
     def marginal_prob(self, x, t):
         std = self.sigma_min * (self.sigma_max / self.sigma_min) ** t
         mean = x
         return mean, std
-    
+
     def prior_sampling(self, shape):
         return torch.randn(*shape) * self.sigma_max
-    
+
     def prior_logp(self, z):
         shape = z.shape
         N = np.prod(shape[1:])
-        return -N / 2. * np.log(2 * np.pi * self.sigma_max ** 2) - torch.sum(z ** 2, dim=(1, 2, 3)) / (2 * self.sigma_max ** 2)
-    
+        return -N / 2.0 * np.log(2 * np.pi * self.sigma_max**2) - torch.sum(
+            z**2, dim=(1, 2, 3)
+        ) / (2 * self.sigma_max**2)
+
     def discretize(self, x, t):
         """SMLD(NCSN) discretization."""
         timestep = (t * (self.N - 1) / self.T).long()
         sigma = self.discrete_sigmas.to(t.device)[timestep]
-        adjacent_sigma = torch.where(timestep == 0, torch.zeros_like(t), self.discrete_sigmas[timestep - 1].to(t.device))
+        adjacent_sigma = torch.where(
+            timestep == 0,
+            torch.zeros_like(t),
+            self.discrete_sigmas[timestep - 1].to(t.device),
+        )
         f = torch.zeros_like(x)
-        G = torch.sqrt(sigma ** 2 - adjacent_sigma ** 2)
+        G = torch.sqrt(sigma**2 - adjacent_sigma**2)
         return f, G
-
-
