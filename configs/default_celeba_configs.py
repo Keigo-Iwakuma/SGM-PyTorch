@@ -27,7 +27,7 @@ def get_default_configs():
     sampling.probability_flow = False
     sampling.snr = 0.17
 
-    # evaluation 
+    # evaluation
     config.eval = evaluate = ml_collections.ConfigDict()
     evaluate.begin_ckpt = 1
     evaluate.end_ckpt = 26
@@ -49,11 +49,11 @@ def get_default_configs():
 
     # model
     config.model = model = ml_collections.ConfigDict()
-    model.sigma_max = 90.
+    model.sigma_max = 90.0
     model.sigma_min = 0.01
     model.num_scales = 1000
     model.beta_min = 0.1
-    model.beta_max = 20.
+    model.beta_max = 20.0
     model.dropout = 0.1
     model.embedding_type = "fourier"
 
@@ -65,9 +65,11 @@ def get_default_configs():
     optim.beta1 = 0.9
     optim.eps = 1e-8
     optim.warmup = 5000
-    optim.grad_clip = 1.
+    optim.grad_clip = 1.0
 
     config.seed = 42
-    config.device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+    config.device = (
+        torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+    )
 
     return config
