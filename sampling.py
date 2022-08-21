@@ -83,6 +83,7 @@ def get_sampling_fn(config, sde, shape, inverse_scaler, eps):
     if sampler_name.lower() == "ode":
         sampling_fn = get_ode_sampler(
             sde=sde,
+            shape=shape,
         )
 
 
@@ -136,3 +137,7 @@ class Corrector(abc.ABC):
             x_mean: A PyTorch tensor. The next state without random noise. Useful for denoising.
         """
         pass
+
+
+def get_ode_sampler(sde, shape, inverse_scaler,):
+    pass
