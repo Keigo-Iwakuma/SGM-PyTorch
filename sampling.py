@@ -139,5 +139,51 @@ class Corrector(abc.ABC):
         pass
 
 
-def get_ode_sampler(sde, shape, inverse_scaler,):
-    pass
+@register_predictor(name="euler_maruyama")
+class EulerMaruyamaPredictor(Predictor):
+    def __init__(self, sde, score_fn, probability_flow=False):
+        super().__init__(sde, score_fn, probability_flow)
+    
+    def update_fn(self, x, t):
+        td = -1. / self.rsde.N
+        z = torch.randn_like(x)
+        drift, diffusion = self.rsde.sde(x, t)
+        x_mean = x + drift * dt
+        x = x_mean + diffusion[:, None, None, None] * np.sqrt(-dt) * z
+        return x, x_mean
+
+
+def get_ode_sampler(
+    sde, 
+    shape, 
+    inverse_scaler,
+    denoise=False,
+    rtol=1e-5,
+    atol=1e-5,
+    method="RK45",
+    eps=1e-3,
+    device="cuda"
+):
+    """
+    Probability flow ODE sampler with the black-box ODE solver.
+
+    Args:
+        sde: An `sde_lib.SDE` object that represents the forward SDE.
+        shape: A sequence of integers. The expected shape of a single sample.
+        inverse_scaler: The inverse data normalizer.
+        denoise: If `True`, add one-step denoising to final samples.
+        rtol: A `flaot` number. The relative tolerance level of the ODE solver.
+        atol: A `flaot` number. The absolute tolerance level of the ODE solver.
+        method: A `str`. The algorithm used for the black-box ODE solver.
+            See the documentation of `scipy.integrate.solve_ivp`.
+        eps: A `flaot` number. The reverse-time SDE/ODE will be integrated to `eps` for numerical stability.
+        device: PyTorch device.
+
+    Returns:
+        A sampling function that return s samples and the number of function evaluations during sampling.
+    """
+
+    def denoise_update_fn(model, x):
+        score_fn = get_score_fn(sde, model, train=False, continuous=True)
+        # Reverse diffusion predictor for denoising
+        predicotr_obj = ReverseDiffusionPredicotr(sde, score_fn, probability_flow=False)
