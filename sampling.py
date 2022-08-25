@@ -286,6 +286,39 @@ class AnnealedLangevinDynamics(Corrector):
         return x, x_mean
 
 
+@register_corrector(name="none")
+class NoneCorrector(Corrector):
+    """An empty corrector that does nothing."""
+
+    def __init__(self, sde, score_fn, snr, n_steps):
+        pass
+
+    def update_fn(self, x, t):
+        return x, x
+
+
+def shared_predictor_update_fn(x, t, sde, model, predictor, probability_flow, continuous):
+    """A wrapper configures and returns the update function of predictors."""
+    score_fn = mutils.get_score_fn(sde, model, train=False, continuous=continuous)
+    if predictor is None:
+        # Corrector-only sampler
+        predictor_obj = NonePredictor(sde, score_fn, probability_flow)
+    else:
+        predictor_obj = predictor(sde, score_fn, probability_flow)
+    return predictor_obj.update_fn(x, t)
+
+
+def shared_corrector_update_fn(x, t, sde, model, corrector, continuous, snr, n_steps):
+    """A wrapper that configures and returns the update function of correctors."""
+    score_fn = mutils.get_score_fn(sde, model, train=False, continuous=continuous)
+    if corrector is None:
+        # Predictor-only sampler
+        corrector_obj = NoneCorrector(sde, score_fn, snr, n_steps)
+    else:
+        corrector_obj = corrector(sde, score_fn, snr, n_steps)
+    return corrector_obj.update_fn(x, t)
+
+
 def get_ode_sampler(
     sde, 
     shape, 
