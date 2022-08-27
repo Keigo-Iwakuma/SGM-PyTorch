@@ -319,6 +319,57 @@ def shared_corrector_update_fn(x, t, sde, model, corrector, continuous, snr, n_s
     return corrector_obj.update_fn(x, t)
 
 
+def get_pc_sampler(
+    sde,
+    shape,
+    predictor,
+    corrector,
+    inverse_scaler,
+    snr,
+    n_steps=1,
+    probability_flow=False,
+    continuous=False,
+    denoise=True,
+    eps=1e-3,
+    device="cuda",
+):
+    """
+    Create a Predictor-Corrector (PC) sampler.
+
+    Args:
+        sde: An `sde_lib.SDE` object representing the forward SDE.
+        shape: A sequence of integers. The expected shape of a single sample.
+        predictor: A subclass of `sampling.Predictor` representing the predictor algorithm.
+        corrector: A subclass of `sampling.Corrector` representing the corrector algorithm.
+        inverse_scaler: The inverse data normalizer.
+        snr: A `float` number. The signal-to noise ratio for configuring correctors.
+        n_steps: An integer. The number of corrector steps per predictor update.
+        probability_flow: If `True`, solve the reverse-time probability flow ODE when running the predictor.
+        continuous: `True` indicates that the score model was continuously trained.
+        denoise: If `True`, add one-step denoising to the final samples.
+        eps: A `float` number. The reverse-time SDE and ODE are integrated to `epsilon` to avoid numerical issues.
+        device: PyTorch device.
+
+    Returns:
+        A sampling function that returns samples and the number of function evaluations during sampling.
+    """
+    # Create predictor & corrector update functions
+    predictor_update_fn = functools.partial(
+        shared_predictor_update_fn,
+        sde=sde,
+        predictor=predictor,
+        probability_flow=probability_flow,
+        continuous=continuous,
+    )
+    corrector_update_fn = functools.partial(
+        shared_corrector_update_fn,
+        sde=sde,
+        corrector=corrector,
+        continuous=continuous,
+        snr=snr,
+        n_steps=n_steps,
+    )
+
 def get_ode_sampler(
     sde, 
     shape, 
