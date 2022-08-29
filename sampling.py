@@ -143,9 +143,9 @@ class Corrector(abc.ABC):
 class EulerMaruyamaPredictor(Predictor):
     def __init__(self, sde, score_fn, probability_flow=False):
         super().__init__(sde, score_fn, probability_flow)
-    
+
     def update_fn(self, x, t):
-        dt = -1. / self.rsde.N
+        dt = -1.0 / self.rsde.N
         z = torch.randn_like(x)
         drift, diffusion = self.rsde.sde(x, t)
         x_mean = x + drift * dt
@@ -157,7 +157,7 @@ class EulerMaruyamaPredictor(Predictor):
 class ReverseDiffusionPredictor(Predictor):
     def __init__(self, sde, score_fn, probability_flow=False):
         super().__init__(sde, score_fn, probability_flow)
-    
+
     def update_fn(self, x, t):
         f, G = self.rsde.discrete(x, t)
         z = torch.randn_like(x)
@@ -173,31 +173,43 @@ class AncestralSamplingPredictor(Predictor):
     def __init__(self, sde, score_fn, probability_flow=False):
         super().__init__(sde, score_fn, probability_flow)
         if not isinstance(sde, sde_lib.VPSDE) and not isinstance(sde, sde_lib.VESDE):
-            raise NotImplementedError(f"SDE class {sde.__class__.__name__} not yet supported.")
-        assert not probability_flow, "Probability flow not supported by ancestral sampling"
-    
+            raise NotImplementedError(
+                f"SDE class {sde.__class__.__name__} not yet supported."
+            )
+        assert (
+            not probability_flow
+        ), "Probability flow not supported by ancestral sampling"
+
     def vesde_update_fn(self, x, t):
         sde = self.sde
         timestep = (t * (sde.N - 1) / sde.T).long()
         sigma = sde.discrete_sigmas[timestep]
-        adjacent_sigma = torch.where(timestep == 0, torch.zeros_like(t), sde.descrete_sigmas.to(t.device)[timestep - 1])
+        adjacent_sigma = torch.where(
+            timestep == 0,
+            torch.zeros_like(t),
+            sde.descrete_sigmas.to(t.device)[timestep - 1],
+        )
         score = self.score_fn(x, t)
-        x_mean = x + score * (sigma ** 2 - adjacent_sigma ** 2)[:, None, None, None]
-        std = torch.sqrt((adjacent_sigma ** 2 * (sigma ** 2 - adjacent_sigma ** 2)) / (sigma ** 2))
+        x_mean = x + score * (sigma**2 - adjacent_sigma**2)[:, None, None, None]
+        std = torch.sqrt(
+            (adjacent_sigma**2 * (sigma**2 - adjacent_sigma**2)) / (sigma**2)
+        )
         noise = torch.randn_like(x)
         x = x_mean + std[:, None, None, None] * noise
         return x, x_mean
-    
+
     def vpsde_update_fn(self, x, t):
         sde = self.sde
         timestep = (t * (sde.N - 1) / sde.T).long()
         beta = sde.discrete_betas.to(t.device)[timestep]
         score = self.score_fn(x, t)
-        x_mean = (x + beta[:, None, None, None] * score) / torch.sqrt(1. - beta)[:, None, None, None]
+        x_mean = (x + beta[:, None, None, None] * score) / torch.sqrt(1.0 - beta)[
+            :, None, None, None
+        ]
         noise = torch.randn_like(x)
         x = x_mean + torch.sqrt(beta)[:, None, None, None] * noise
         return x, x_mean
-    
+
     def update_fn(self, x, t):
         if isinstance(self.sde, sde_lib.VESDE):
             return self.vesde_update_fn(x, t)
@@ -220,11 +232,15 @@ class NonePredictor(Predictor):
 class LangevinCorrector(Corrector):
     def __init__(self, sde, score_fn, snr, n_steps):
         super().__init__(sde, score_fn, snr, n_steps)
-        if not isinstance(sde, sde_lib.VPSDE) \
-            and not isinstance(sde, sde_lib.VESDE) \
-            and not isinstance(sde, sde_lib.subVPSDE):
-            raise NotImplementedError(f"SDE class {sde.__class__.__name__} not yet supported.")
-    
+        if (
+            not isinstance(sde, sde_lib.VPSDE)
+            and not isinstance(sde, sde_lib.VESDE)
+            and not isinstance(sde, sde_lib.subVPSDE)
+        ):
+            raise NotImplementedError(
+                f"SDE class {sde.__class__.__name__} not yet supported."
+            )
+
     def update_fn(self, x, t):
         sde = self.sde
         score_fn = self.score_fn
@@ -235,7 +251,7 @@ class LangevinCorrector(Corrector):
             alpha = sde.alphas.to(t.device)[timestep]
         else:
             alpha = torch.ones_like(t)
-        
+
         for i in range(n_steps):
             grad = score_fn(x, t)
             noise = torch.randn_like(x)
@@ -258,11 +274,15 @@ class AnnealedLangevinDynamics(Corrector):
 
     def __init__(self, sde, score_fn, snr, n_steps):
         super().__init__(sde, score_fn, snr, n_steps)
-        if not isinstance(sde, sde_lib.VPSDE) \
-            and not isinstance(sde, sde_lib.VESDE) \
-            and not isinstance(sde, sde_lib.subVPSDE):
-            raise NotImplementedError(f"SDE class {sde.__class__.__name__} not yet supported.")
-    
+        if (
+            not isinstance(sde, sde_lib.VPSDE)
+            and not isinstance(sde, sde_lib.VESDE)
+            and not isinstance(sde, sde_lib.subVPSDE)
+        ):
+            raise NotImplementedError(
+                f"SDE class {sde.__class__.__name__} not yet supported."
+            )
+
     def update_fn(self, x, t):
         sde = self.sde
         score_fn = self.score_fn
@@ -273,7 +293,7 @@ class AnnealedLangevinDynamics(Corrector):
             alpha = sde.alphas.to(t.device)[timestep]
         else:
             alpha = torch.ones_like(t)
-        
+
         std = self.sde.marginal_prob(x, t)[1]
 
         for i in range(n_steps):
@@ -282,7 +302,7 @@ class AnnealedLangevinDynamics(Corrector):
             step_size = (target_snr * std) ** 2 * 2 * alpha
             x_mean = x + step_size[:, None, None, None] * grad
             x = x_mean + noise * torch.sqrt(step_size * 2)[:, None, None, None]
-        
+
         return x, x_mean
 
 
@@ -297,7 +317,9 @@ class NoneCorrector(Corrector):
         return x, x
 
 
-def shared_predictor_update_fn(x, t, sde, model, predictor, probability_flow, continuous):
+def shared_predictor_update_fn(
+    x, t, sde, model, predictor, probability_flow, continuous
+):
     """A wrapper configures and returns the update function of predictors."""
     score_fn = mutils.get_score_fn(sde, model, train=False, continuous=continuous)
     if predictor is None:
@@ -390,19 +412,20 @@ def get_pc_sampler(
                 x, x_mean = corrector_update_fn(x, vec_t, model=model)
                 x, x_mean = predictor_update_fn(x, vec_t, model=model)
         return inverse_scaler(x_mean if denoise else x), sde.N * (n_steps + 1)
-        
+
     return pc_sampler
 
+
 def get_ode_sampler(
-    sde, 
-    shape, 
+    sde,
+    shape,
     inverse_scaler,
     denoise=False,
     rtol=1e-5,
     atol=1e-5,
     method="RK45",
     eps=1e-3,
-    device="cuda"
+    device="cuda",
 ):
     """
     Probability flow ODE sampler with the black-box ODE solver.
