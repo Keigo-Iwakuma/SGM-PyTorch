@@ -105,13 +105,12 @@ def get_sampling_fn(config, sde, shape, inverse_scaler, eps):
             continuous=config.training.continuous,
             denoise=config.sampling.noise_removal,
             eps=eps,
-            device=config.device
+            device=config.device,
         )
     else:
         raise ValueError(f"Sampler name {sampler_name} unknown.")
-    
-    return sampling_fn
 
+    return sampling_fn
 
 
 class Predictor(abc.ABC):
@@ -480,13 +479,13 @@ def get_ode_sampler(
         vec_eps = torch.ones(x.shape[0], device=x.device) * eps
         _, x = predicotr_obj.update_fn(x, vec_eps)
         return x
-    
+
     def drift_fn(model, x, t):
         """Get the drift function of the reverse-time SDE."""
         score_fn = get_score_fn(sde, model, train=False, continuous=True)
         rsde = sde.reverse(score_fn, probability_flow=True)
         return rsde.sde(x, t)[0]
-    
+
     def ode_sampler(model, z=None):
         """
         The probability flow ODE sampler with black-box ODE solver.
@@ -504,23 +503,35 @@ def get_ode_sampler(
                 x = sde.prior_sampling(shape).to(device)
             else:
                 x = z
-        
+
         def ode_func(t, x):
             x = from_flattened_numpy(x, shape).to(device).type(torch.float32)
             vec_t = torch.ones(shape[0], device=x.device) * t
             drift = drift_fn(model, x, vec_t)
             return to_flattend_numpy(drift)
-        
+
         # Black-box ODE solver for the probability flow ODE
-        solution = integrate.solve_ivp(ode_func, (sde.T, eps), to_flattend_numpy(x), rtol=rtol, atol=atol, method=method)
+        solution = integrate.solve_ivp(
+            ode_func,
+            (sde.T, eps),
+            to_flattend_numpy(x),
+            rtol=rtol,
+            atol=atol,
+            method=method,
+        )
         nfe = solution.nfev
-        x = torch.tensor(solution.y[:, -1]).reshape(shape).to(device).type(torch.float32)
+        x = (
+            torch.tensor(solution.y[:, -1])
+            .reshape(shape)
+            .to(device)
+            .type(torch.float32)
+        )
 
         # Denoising is equivalent to running one predictor step without adding noise
         if denoise:
             x = denoise_update_fn(model, x)
-        
+
         x = inverse_scaler(x)
         return x, nfe
-    
+
     return ode_sampler
