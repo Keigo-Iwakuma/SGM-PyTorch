@@ -84,7 +84,34 @@ def get_sampling_fn(config, sde, shape, inverse_scaler, eps):
         sampling_fn = get_ode_sampler(
             sde=sde,
             shape=shape,
+            inverse_scaler=inverse_scaler,
+            denoise=config.sampling.noise_removal,
+            eps=eps,
+            device=config.device,
         )
+        # Predictor-Corrector sampling. Predictor-only and Corrector-only samplers are special cases.
+    elif sampler_name.lower() == "pc":
+        predictor = get_predictor(config.sampling.predictor.lower())
+        corrector = get_corrector(config.sampling.corrector.lower())
+        sampling_fn = get_pc_sampler(
+            sde=sde,
+            shape=shape,
+            predictor=predictor,
+            corrector=corrector,
+            inverse_scaler=inverse_scaler,
+            snr=config.sampling.snr,
+            n_steps=config.sampling.n_steps_each,
+            probability_flow=config.sampling.probability_flow,
+            continuous=config.training.continuous,
+            denoise=config.sampling.noise_removal,
+            eps=eps,
+            device=config.device
+        )
+    else:
+        raise ValueError(f"Sampler name {sampler_name} unknown.")
+    
+    return sampling_fn
+
 
 
 class Predictor(abc.ABC):
@@ -449,4 +476,51 @@ def get_ode_sampler(
     def denoise_update_fn(model, x):
         score_fn = get_score_fn(sde, model, train=False, continuous=True)
         # Reverse diffusion predictor for denoising
-        predicotr_obj = ReverseDiffusionPredicotr(sde, score_fn, probability_flow=False)
+        predicotr_obj = ReverseDiffusionPredictor(sde, score_fn, probability_flow=False)
+        vec_eps = torch.ones(x.shape[0], device=x.device) * eps
+        _, x = predicotr_obj.update_fn(x, vec_eps)
+        return x
+    
+    def drift_fn(model, x, t):
+        """Get the drift function of the reverse-time SDE."""
+        score_fn = get_score_fn(sde, model, train=False, continuous=True)
+        rsde = sde.reverse(score_fn, probability_flow=True)
+        return rsde.sde(x, t)[0]
+    
+    def ode_sampler(model, z=None):
+        """
+        The probability flow ODE sampler with black-box ODE solver.
+
+        Args:
+            model: A score model.
+            z: If present, generate samples from latent code `z`.
+        Returns:
+            samples, number of function evaluations.
+        """
+        with torch.no_grad():
+            # Initial sample
+            if z is None:
+                # If not represent, sample the latent code for the prior distribution of the SDE.
+                x = sde.prior_sampling(shape).to(device)
+            else:
+                x = z
+        
+        def ode_func(t, x):
+            x = from_flattened_numpy(x, shape).to(device).type(torch.float32)
+            vec_t = torch.ones(shape[0], device=x.device) * t
+            drift = drift_fn(model, x, vec_t)
+            return to_flattend_numpy(drift)
+        
+        # Black-box ODE solver for the probability flow ODE
+        solution = integrate.solve_ivp(ode_func, (sde.T, eps), to_flattend_numpy(x), rtol=rtol, atol=atol, method=method)
+        nfe = solution.nfev
+        x = torch.tensor(solution.y[:, -1]).reshape(shape).to(device).type(torch.float32)
+
+        # Denoising is equivalent to running one predictor step without adding noise
+        if denoise:
+            x = denoise_update_fn(model, x)
+        
+        x = inverse_scaler(x)
+        return x, nfe
+    
+    return ode_sampler
