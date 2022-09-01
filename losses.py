@@ -25,3 +25,26 @@ def get_optimizer(config, params):
         )
 
     return optimizer
+
+
+def optimization_manager(config):
+    """Returns an optimize_fn based on `config`."""
+
+    def optimize_fn(
+        optimizer,
+        params,
+        step,
+        lr=config.optim.lr,
+        warmup=config.optim.warmup,
+        grad_clip=config.optim.grad_clip,
+    ):
+        """Optimize with warmup and gradient clipping (disabled if negative)."""
+        if warmup > 0:
+            for g in optimizer.param_groups:
+                g["lr"] = lr * np.minimum(step / warmup, 1.0)
+        if grad_clip >= 0:
+            torch.nn.utils.clip_grad_norm_(params, max_norm=grad_clip)
+        optimizer.step()
+    
+    return optimize_fn
+        
