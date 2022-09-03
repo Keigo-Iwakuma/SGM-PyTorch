@@ -47,4 +47,23 @@ def optimization_manager(config):
         optimizer.step()
     
     return optimize_fn
-        
+
+
+def get_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_weighting=True, eps=1e-5):
+    """
+    Create a loss function for training with arbitrary SDEs.
+
+    Args:
+        sde: An `sde_lib.SDE` object that represents the forward SDE.
+        train: `Train` for training loss and `False` for evaluation loss.
+        reduce_mean: If `Train`, average the loss across data dimensions. Otherwise sum the loss across data dimensions.
+        continuous: `True` indicates that the model is defined to take continuous time steps. Otherwise it requires
+            ad-hoc interpolation to take continuous time steps.
+        likelihood_weighting: If `True`, weight the mixuture of score matching losses
+            according to https://arxiv.org/abs/2101.09258; otherwise use the weighting recommended in our paper.
+        eps: A `float` number. The smallest time step to sample from.
+
+    Returns:
+        A loss function:
+    """
+    reduce_op = torch.mean if reduce_mean else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
