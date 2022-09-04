@@ -17,7 +17,7 @@ def get_optimizer(config, params):
             lr=config.optim.lr,
             betas=(config.optim.beta1, 0.999),
             eps=config.optim.eps,
-            weight_decay=config.optim.weight_decay
+            weight_decay=config.optim.weight_decay,
         )
     else:
         raise NotImplementedError(
@@ -45,11 +45,13 @@ def optimization_manager(config):
         if grad_clip >= 0:
             torch.nn.utils.clip_grad_norm_(params, max_norm=grad_clip)
         optimizer.step()
-    
+
     return optimize_fn
 
 
-def get_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_weighting=True, eps=1e-5):
+def get_sde_loss_fn(
+    sde, train, reduce_mean=True, continuous=True, likelihood_weighting=True, eps=1e-5
+):
     """
     Create a loss function for training with arbitrary SDEs.
 
@@ -66,7 +68,11 @@ def get_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_we
     Returns:
         A loss function:
     """
-    reduce_op = torch.mean if reduce_mean else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
+    reduce_op = (
+        torch.mean
+        if reduce_mean
+        else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
+    )
 
     def loss_fn(model, batch):
         """
@@ -93,10 +99,10 @@ def get_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_we
             g2 = sde.sde(torch.zeros_like(batch), t)[1] ** 2
             losses = torch.square(score + z / std[:, None, None, None])
             losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1) * g2
-        
+
         loss = torch.mean(losses)
         return loss
-    
+
     return loss_fn
 
 
@@ -106,7 +112,11 @@ def get_smld_loss_fn(vesde, train, reduce_mean=False):
 
     # Previous SMLD models assume descending sigmas
     smld_sigma_array = torch.flip(vesde.discrete_sigmas, dims=(0,))
-    reduce_op = torch.mean if reduce_mean else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
+    reduce_op = (
+        torch.mean
+        if reduce_mean
+        else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
+    )
 
     def loss_fn(model, batch):
         model_fn = mutils.get_model_fn(model, train=train)
@@ -115,12 +125,12 @@ def get_smld_loss_fn(vesde, train, reduce_mean=False):
         noise = torch.randn_like(batch) * sigmas[:, None, None, None]
         perturbed_data = noise + batch
         score = model_fn(perturbed_data, labels)
-        target = -noise / (sigmas ** 2)[:, None, None, None]
+        target = -noise / (sigmas**2)[:, None, None, None]
         losses = torch.square(score - target)
-        losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1) * sigmas ** 2
+        losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1) * sigmas**2
         loss = torch.mean(losses)
         return loss
-    
+
     return loss_fn
 
 
@@ -128,8 +138,11 @@ def get_ddpm_loss_fn(vpsde, train, reduce_mean=True):
     """Legacy code to reproduce previous results on DDPM. Not recommended for new work."""
     assert isinstance(vpsde, VPSDE), "DDPM training only works for VPSDEs."
 
-    reduce_op = torch.mean if reduce_mean else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
-
+    reduce_op = (
+        torch.mean
+        if reduce_mean
+        else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
+    )
 
     def loss_fn(model, batch):
         model_fn = mutils.get_model_fn(model, train=train)
@@ -137,12 +150,14 @@ def get_ddpm_loss_fn(vpsde, train, reduce_mean=True):
         sqrt_alphas_cumprod = vpsde.sqrt_alphas_cumprod.to(batch.device)
         sqrt_1m_alphas_cumprod = vpsde.sqrt_1m_alphas_cumprod.to(batch.device)
         noise = torch.randn_like(batch)
-        perturbed_data = sqrt_alphas_cumprod[labels, None, None, None] * batch + \
-            sqrt_1m_alphas_cumprod[labels, None, None, None] * noise
+        perturbed_data = (
+            sqrt_alphas_cumprod[labels, None, None, None] * batch
+            + sqrt_1m_alphas_cumprod[labels, None, None, None] * noise
+        )
         score = model_fn(perturbed_data, labels)
         losses = torch.square(score - noise)
         losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1)
         loss = torch.mean(losses)
         return loss
-    
+
     return loss_fn
