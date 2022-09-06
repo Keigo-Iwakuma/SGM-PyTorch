@@ -163,7 +163,14 @@ def get_ddpm_loss_fn(vpsde, train, reduce_mean=True):
     return loss_fn
 
 
-def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True, likelihood_weighting=False):
+def get_step_fn(
+    sde,
+    train,
+    optimize_fn=None,
+    reduce_mean=False,
+    continuous=True,
+    likelihood_weighting=False,
+):
     """
     Create a one-step training/evaluation function.
 
@@ -172,12 +179,17 @@ def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True
         optimize_fn: An optimization function.
         reduce_mean: If `True`, averate the loss across data dimensions. Otherwise sum the loss across data dimensions.
         continuous: `True` indicates that the model is defined to take continuous time steps.
-        likelihoood_weighting: If `True`, weight the mixture of score matching losses according to 
+        likelihoood_weighting: If `True`, weight the mixture of score matching losses according to
             https://arxiv.org/abs/2101.09258; otherwise use the weighting recommended by our paper.
-    
+
     Returns:
         A one-step function for training or evaluation.
     """
     if continuous:
-        loss_fn = get_sde_loss_fn(sde, train, reduce_mean=reduce_mean,
-        continuous=True, likelihood_weighting=likelihood_weighting)
+        loss_fn = get_sde_loss_fn(
+            sde,
+            train,
+            reduce_mean=reduce_mean,
+            continuous=True,
+            likelihood_weighting=likelihood_weighting,
+        )
