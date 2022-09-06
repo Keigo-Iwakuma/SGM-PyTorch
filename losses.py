@@ -193,3 +193,27 @@ def get_step_fn(
             continuous=True,
             likelihood_weighting=likelihood_weighting,
         )
+    else:
+        assert not likelihood_weighting, "Likelihood weighting is not supported for original SMLD/DDPM training."
+        if isinstance(sde, VESDE):
+            loss_fn = get_smld_loss_fn(sde, train, reduce_mean=reduce_mean)
+        elif isinstance(sde, VPSDE):
+            loss_fn = get_ddpm_loss_fn(sde, train, reduce_mean=reduce_mean)
+        else:
+            raise ValueError(f"Discrete training for {sde.__class__.__name__} is not recommended.")
+    
+    def step_fn(state, batch):
+        """
+        Running on step of training or evaluation.
+
+        This function will undergo `jax.lax.scan` so that multiple steps can be pmapped and jit-compiled together
+        for faster execution.
+
+        Args:
+            state: A dictionary of training information, containing the score model, optimizer,
+                EMA status, and number of optimization steps.
+            batch: A mini-batch of training/evaluation data.
+
+        Returns:
+            loss: The average loss value of this state.
+        """
