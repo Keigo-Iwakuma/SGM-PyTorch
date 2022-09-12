@@ -217,3 +217,23 @@ def get_step_fn(
         Returns:
             loss: The average loss value of this state.
         """
+        model = state["model"]
+        if train:
+            optimizer = state["optimizer"]
+            optimizer.zero_grad()
+            loss = loss_fn(model, batch)
+            loss.backward()
+            optimize_fn(optimizer, model.parameters(), step=state["step"])
+            state["step"] += 1
+            state["ema"].update(model.parameters())
+        else:
+            with torch.no_grad():
+                ema = state["ema"]
+                ema.store(model.parameters())
+                ema.copy_to(model.parameters())
+                loss = loss_fn(model, batch)
+                ema.restore(model.parameters())
+        
+        return loss
+
+    return step_fn
