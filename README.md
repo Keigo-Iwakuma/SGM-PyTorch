@@ -5,3 +5,6 @@ This repository is reproduction of https://github.com/yang-song/score_sde_pytorc
 ## environment
 use docker image as runtime
 nvcr.io/nvidia/pytorch:22.06-py3
+
+## reference
+- https://arxiv.org/abs/2011.13456
