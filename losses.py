@@ -194,14 +194,18 @@ def get_step_fn(
             likelihood_weighting=likelihood_weighting,
         )
     else:
-        assert not likelihood_weighting, "Likelihood weighting is not supported for original SMLD/DDPM training."
+        assert (
+            not likelihood_weighting
+        ), "Likelihood weighting is not supported for original SMLD/DDPM training."
         if isinstance(sde, VESDE):
             loss_fn = get_smld_loss_fn(sde, train, reduce_mean=reduce_mean)
         elif isinstance(sde, VPSDE):
             loss_fn = get_ddpm_loss_fn(sde, train, reduce_mean=reduce_mean)
         else:
-            raise ValueError(f"Discrete training for {sde.__class__.__name__} is not recommended.")
-    
+            raise ValueError(
+                f"Discrete training for {sde.__class__.__name__} is not recommended."
+            )
+
     def step_fn(state, batch):
         """
         Running on step of training or evaluation.
@@ -233,7 +237,7 @@ def get_step_fn(
                 ema.copy_to(model.parameters())
                 loss = loss_fn(model, batch)
                 ema.restore(model.parameters())
-        
+
         return loss
 
     return step_fn
