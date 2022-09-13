@@ -7,8 +7,9 @@ import logging
 def restore_checkpoint(ckpt_dir, state, device):
     if not tf.io.gfile.exists(ckpt_dir):
         tf.io.gfile.makedirs(os.path.join(ckpt_dir))
-        logging.warning(f"No checkpoint found at {ckpt_dir}."
-        f"Returned the same state as input")
+        logging.warning(
+            f"No checkpoint found at {ckpt_dir}." f"Returned the same state as input"
+        )
         return state
     else:
         loaded_state = torch.load(ckpt_dir, map_location=device)
