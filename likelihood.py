@@ -38,3 +38,39 @@ def get_likelihood_fn(sde, inverse_scaler, hutchinson_type="Rademacher", rtol=1e
         A function that a batch of data points and returns the log-likelihood in bits/dim,
             the latent code, and the number of function evaluations cost by computation.
     """
+
+    def drift_fn(model, x, t):
+        """The drift function of the reverse-time SDE."""
+        score_fn = mutils.get_score_fn(sde, model, train=False, continuous=True)
+        # Probability flow ODE is a special case of Reverse SDE
+        rsde = sde.reverse(score_fn, probability_flow=True)
+        return rsde.sde(x, t)[0]
+    
+    def div_fn(model, x, t, noise):
+        return get_div_fn(lambda xx, tt: drift_fn(model, xx, tt))(x, t, noise)
+    
+    def likelihood_fn(model, data):
+        """
+        Compute an unbiased estimate to the log-likelihood in bits/dim.
+
+        Args:
+            model: A score model.
+            data: A PyTorch tensor.
+
+        Returns:
+            bpd: A PyTorch tensor of shape [batch size]. The log-likelihoods on `data` in bits/dim.
+            z: A PyTorch tensor of the same shape as `data`. The latent representation of `data` under
+                the probability flow ODE
+            nfe: An integer. The number of function evaluations used for running the black-box ODE solver.
+        """
+
+        with torch.no_grad():
+            shape = data.shape
+            if hutchinson_type == "Gaussian":
+                epsilon = torch.randn_like(data)
+            elif hutchinson_type == "Rademacher":
+                epsilon = torch.randint_like(data, low=0, high=2).float() * 2 - 1
+            else:
+                raise NotImplementedError(f"Hutchinson type {hutchinson_type} unknown.")
+            
+            def ode_func(t, x):
