@@ -16,11 +16,19 @@ def get_div_fn(fn):
             grad_fn_eps = torch.autograd.grad(fn_eps, x)[0]
         x.requires_grad_(False)
         return torch.sum(grad_fn_eps * eps, dim=tuple(range(1, len(x.shape))))
-    
+
     return div_fn
 
 
-def get_likelihood_fn(sde, inverse_scaler, hutchinson_type="Rademacher", rtol=1e-5, atol=1e-5, method="RK45", eps=1e-5):
+def get_likelihood_fn(
+    sde,
+    inverse_scaler,
+    hutchinson_type="Rademacher",
+    rtol=1e-5,
+    atol=1e-5,
+    method="RK45",
+    eps=1e-5,
+):
     """
     Create a function to compute the unbiased log-likelihood estimate of a given data point.
 
@@ -45,10 +53,10 @@ def get_likelihood_fn(sde, inverse_scaler, hutchinson_type="Rademacher", rtol=1e
         # Probability flow ODE is a special case of Reverse SDE
         rsde = sde.reverse(score_fn, probability_flow=True)
         return rsde.sde(x, t)[0]
-    
+
     def div_fn(model, x, t, noise):
         return get_div_fn(lambda xx, tt: drift_fn(model, xx, tt))(x, t, noise)
-    
+
     def likelihood_fn(model, data):
         """
         Compute an unbiased estimate to the log-likelihood in bits/dim.
@@ -72,5 +80,16 @@ def get_likelihood_fn(sde, inverse_scaler, hutchinson_type="Rademacher", rtol=1e
                 epsilon = torch.randint_like(data, low=0, high=2).float() * 2 - 1
             else:
                 raise NotImplementedError(f"Hutchinson type {hutchinson_type} unknown.")
-            
+
             def ode_func(t, x):
+                sample = (
+                    mutils.from_flattened_numpy(x[: -shape[0]], shape)
+                    .to(data.device)
+                    .type(torch.float32)
+                )
+                vec_t = torch.ones(sample.shape[0], device=sample.device) * t
+                drift = mutils.to_flattend_numpy(drift_fn(model, sample, vec_t))
+                logp_grad = mutils.to_flattend_numpy(
+                    div_fn(model, sample, vec_t, epsilon)
+                )
+                return np.concatenate([drift, logp_grad], axis=0)
