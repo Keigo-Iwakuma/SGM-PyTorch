@@ -93,20 +93,32 @@ def get_likelihood_fn(
                     div_fn(model, sample, vec_t, epsilon)
                 )
                 return np.concatenate([drift, logp_grad], axis=0)
-            
-            init = np.concatenate([mutils.to_flattend_numpy(data), np.zeros((shape[0],))], axis=0)
-            solution = integrate.solve_ivp(ode_func, (eps, sde.T), init, rtol=rtol, atol=atol, method=method)
+
+            init = np.concatenate(
+                [mutils.to_flattend_numpy(data), np.zeros((shape[0],))], axis=0
+            )
+            solution = integrate.solve_ivp(
+                ode_func, (eps, sde.T), init, rtol=rtol, atol=atol, method=method
+            )
             nfe = solution.nfev
             zp = solution.y[:, -1]
-            z = mutils.from_flattened_numpy(zp[:-shape[0]], shape).to(data.device).type(torch.float32)
-            delta_logp = mutils.from_flattened_numpy(zp[-shape[0]:],(shape[0],)).to(data.device).type(torch.float32)
+            z = (
+                mutils.from_flattened_numpy(zp[: -shape[0]], shape)
+                .to(data.device)
+                .type(torch.float32)
+            )
+            delta_logp = (
+                mutils.from_flattened_numpy(zp[-shape[0] :], (shape[0],))
+                .to(data.device)
+                .type(torch.float32)
+            )
             prior_logp = sde.prior_logp(z)
-            bpd = - (prior_logp + delta_logp) / np.log(2)
+            bpd = -(prior_logp + delta_logp) / np.log(2)
             N = np.prod(shape[1:])
             bpd = bpd / N
             # A hack to convert log-likelihoods to bits/dim
-            offset = 7. - inverse_scaler(-1.)
+            offset = 7.0 - inverse_scaler(-1.0)
             bpd = bpd + offset
             return bpd, z, nfe
-        
+
         return likelihood_fn
