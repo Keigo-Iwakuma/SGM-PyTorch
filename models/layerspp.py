@@ -97,5 +97,28 @@ class Upsample(nn.Module):
         else:
             if with_conv:
                 self.Conv2d_0 = up_or_down_sampling.Conv2d(
-                    in_ch, out_ch, kernel=3, up=True
+                    in_ch, out_ch, kernel=3, up=True, resample_kernel=fir_kernel, use_bias=True, kernel_init=default_init()
                 )
+        self.fir = fir   
+        self.with_conv = with_conv
+        self.fir_kernel = fir_kernel
+        self.out_ch = out_ch
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        if not self.fir:
+            h = F.interpolate(x, (H * 2, W * 2), "nearest")
+            if self.with_conv:
+                h = self.Conv_0(h)
+        else:
+            if not self.with_conv:
+                h = up_or_down_sampling.upsample_2d(x, self.fir_kernel, factor=2)
+            else:
+                h = self.Conv2d_0(x)
+        
+        return h
+
+
+
+
+            
