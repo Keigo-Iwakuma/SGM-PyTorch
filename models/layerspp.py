@@ -119,6 +119,21 @@ class Upsample(nn.Module):
         return h
 
 
-
-
-            
+class Downsample(nn.Module):
+    def __init__(self, in_ch=None, out_ch=None, with_conv=False, fir=False, fir_kernel=(1, 3, 3, 1)):
+        super().__init__()
+        out_ch = out_ch if out_ch else in_ch
+        if not fir:
+            if with_conv:
+                self.Conv_0 = conv3x3(in_ch, out_ch, stride=2, padding=0)
+        else:
+            if with_conv:
+                self.Conv2d_0 = up_or_down_sampling.Conv2d(in_ch, out_ch,
+                kernel=3, down=True,
+                resample_kernel=fir_kernel,
+                use_bias=True, 
+                kernel_init=default_init())
+        self.fir = fir
+        self.fir_kernel = fir_kernel
+        self.with_conv = with_conv
+        self.out_ch = out_ch
