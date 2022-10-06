@@ -1,5 +1,6 @@
 """Layers for defining NCSN++."""
 
+from turtle import up
 import numpy as np
 import torch
 import torch.nn as nn
@@ -278,3 +279,29 @@ class ResnetBlockBigGANpp(nn.Module):
             if self.fir:
                 h = up_or_down_sampling.upsample_2d(h, self.fir_kernel, factor=2)
                 x = up_or_down_sampling.upsample_2d(x, self.fir_kernel, factor=2)
+            else:
+                h = up_or_down_sampling.naive_upsample_2d(h, factor=2)
+                x = up_or_down_sampling.naive_upsample_2d(x, factor=2)
+        elif self.down:
+            if self.fir:
+                h = up_or_down_sampling.downsample_2d(h, self.fir_kernel, factor=2)
+                x = up_or_down_sampling.downsample_2d(x, self.fir_kernel, factor=2)
+            else:
+                h = up_or_down_sampling.naive_downsample_2d(h, factor=2)
+                x = up_or_down_sampling.naive_downsample_2d(x, factor=2)
+        
+        h = self.Conv_0(h)
+        # Add bias to each feature map conditioned on the time embedding
+        if temb is not None:
+            h += self.Dense_0(self.act(temb))[:, :, None, None]
+        h = self.act(self.GroupNorm_1(h))
+        h = self.Dropout_0(h)
+        h = self.Conv_1(h)
+
+        if self.in_ch != self.out_ch or self.up or self.down:
+            x = self.Conv_2(x)
+        
+        if not self.skip_rescale:
+            return x + h
+        else:
+            return (x + h) / np.sqrt(2.)
