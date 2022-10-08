@@ -213,7 +213,7 @@ class ResNetBlockDDPMpp(nn.Module):
         self.act = act
         self.out_ch = out_ch
         self.conv_shortcut = conv_shortcut
-    
+
     def forward(self, x, temb=None):
         h = self.act(self.GroupNorm_0(x))
         h = self.Conv_0(h)
@@ -230,7 +230,7 @@ class ResNetBlockDDPMpp(nn.Module):
         if not self.skip_rescale:
             return x + h
         else:
-            return (x + h) / np.sqrt(2.)
+            return (x + h) / np.sqrt(2.0)
 
 
 class ResnetBlockBigGANpp(nn.Module):
@@ -239,17 +239,19 @@ class ResnetBlockBigGANpp(nn.Module):
         act,
         in_ch,
         out_ch=None,
-        temb_dim=None, 
+        temb_dim=None,
         up=False,
         down=False,
         dropout=0.1,
         fir=False,
         fir_kernel=(1, 3, 3, 1),
         skip_rescale=True,
-        init_scale=0.,
+        init_scale=0.0,
     ):
         super().__init__()
-        self.GroupNorm_0 = nn.GroupNorm(num_groups=min(in_ch // 4, 32), num_channels=in_ch, eps=1e-6)
+        self.GroupNorm_0 = nn.GroupNorm(
+            num_groups=min(in_ch // 4, 32), num_channels=in_ch, eps=1e-6
+        )
         self.up = up
         self.down = down
         self.fir = fir
@@ -261,17 +263,19 @@ class ResnetBlockBigGANpp(nn.Module):
             self.Dense_0.weight.data = default_init()(self.Dense_0.weight.shape)
             nn.init.zeros_(self.Dense_0.bias)
 
-        self.GroupNorm_1 = nn.GroupNorm(num_groups=min(out_ch // 4, 32), num_channels=out_ch, eps=1e-6)
+        self.GroupNorm_1 = nn.GroupNorm(
+            num_groups=min(out_ch // 4, 32), num_channels=out_ch, eps=1e-6
+        )
         self.Dropout_0 = nn.Dropout(dropout)
         self.Conv_1 = conv3x3(out_ch, out_ch, init_scale=init_scale)
         if in_ch != out_ch or up or down:
             self.Conv_2 = conv1x1(in_ch, out_ch)
-        
+
         self.skip_rescale = skip_rescale
         self.act = act
         self.in_ch = in_ch
         self.out_ch = out_ch
-    
+
     def forward(self, x, temb=None):
         h = self.act(self.GroupNorm_0(x))
 
@@ -289,7 +293,7 @@ class ResnetBlockBigGANpp(nn.Module):
             else:
                 h = up_or_down_sampling.naive_downsample_2d(h, factor=2)
                 x = up_or_down_sampling.naive_downsample_2d(x, factor=2)
-        
+
         h = self.Conv_0(h)
         # Add bias to each feature map conditioned on the time embedding
         if temb is not None:
@@ -300,8 +304,8 @@ class ResnetBlockBigGANpp(nn.Module):
 
         if self.in_ch != self.out_ch or self.up or self.down:
             x = self.Conv_2(x)
-        
+
         if not self.skip_rescale:
             return x + h
         else:
-            return (x + h) / np.sqrt(2.)
+            return (x + h) / np.sqrt(2.0)
