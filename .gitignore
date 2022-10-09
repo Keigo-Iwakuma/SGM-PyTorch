@@ -131,6 +131,6 @@ dmypy.json
 # assets
 assets/*
 
-# playground
+# playground / notebook
 tutorial
 check.ipynb
