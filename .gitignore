@@ -131,6 +131,9 @@ dmypy.json
 # assets
 assets/*
 
+# checkpoints
+exp/
+
 # playground directory / notebook
 tutorial
 check.ipynb
