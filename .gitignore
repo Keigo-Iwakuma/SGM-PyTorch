@@ -131,7 +131,7 @@ dmypy.json
 # assets
 assets/*
 
-# checkpoints
+# checkpoints of models
 exp/
 
 # playground directory / notebook
